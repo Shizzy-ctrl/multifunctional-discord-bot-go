@@ -104,16 +104,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			s.ChannelMessageSend(m.ChannelID, "❌ Nieprawidłowy numer!")
 		}
 	} else if content == "!lista" {
-		if len(config.Quotes) == 0 {
-			s.ChannelMessageSend(m.ChannelID, "Brak złotych myśli!")
-			return
-		}
-		var msg strings.Builder
-		msg.WriteString("**📜 Lista złotych myśli:**\n\n")
-		for i, q := range config.Quotes {
-			msg.WriteString(fmt.Sprintf("%d. %s\n", i+1, q))
-		}
-		s.ChannelMessageSend(m.ChannelID, msg.String())
+		sendPaginatedList(s, m.ChannelID)
 	} else if strings.HasPrefix(content, "!kanal ") {
 		channelID := strings.TrimPrefix(content, "!kanal ")
 		config.ChannelID = channelID
@@ -155,5 +146,50 @@ func scheduleDailyQuote(s *discordgo.Session) {
 		if config.ChannelID != "" {
 			sendRandomQuote(s, config.ChannelID)
 		}
+	}
+}
+func sendPaginatedList(s *discordgo.Session, channelID string) {
+	if len(config.Quotes) == 0 {
+		s.ChannelMessageSend(channelID, "Brak złotych myśli!")
+		return
+	}
+
+	const maxChars = 1800
+	const maxQuotesPerPage = 12
+
+	for i := 0; i < len(config.Quotes); i += maxQuotesPerPage {
+		end := i + maxQuotesPerPage
+		if end > len(config.Quotes) {
+			end = len(config.Quotes)
+		}
+
+		var msg strings.Builder
+		msg.WriteString(fmt.Sprintf("**📜 Złote Myśli (%d-%d/%d):**\n\n", i+1, end, len(config.Quotes)))
+
+		pageChars := 50
+		for j := i; j < end; j++ {
+			quoteNum := fmt.Sprintf("%d. ", j+1)
+			quotePreview := config.Quotes[j]
+
+			if len(quotePreview) > 100 {
+				quotePreview = quotePreview[:97] + "..."
+			}
+
+			line := quoteNum + quotePreview + "\n"
+			if pageChars+len(line) > maxChars {
+				break
+			}
+
+			msg.WriteString(line)
+			pageChars += len(line)
+		}
+
+		// POPRAWIONE: _ dla message, err dla błędu
+		if _, err := s.ChannelMessageSend(channelID, msg.String()); err != nil {
+			log.Println("Błąd wysyłania listy:", err)
+			return
+		}
+
+		time.Sleep(1000 * time.Millisecond)
 	}
 }
