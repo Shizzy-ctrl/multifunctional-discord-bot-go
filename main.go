@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/robfig/cron/v3"
 )
 
 type Config struct {
@@ -30,6 +31,8 @@ func main() {
 		log.Fatal("Brak tokena Discord! Ustaw zmienną DISCORD_TOKEN")
 	}
 
+	rand.Seed(time.Now().UnixNano()) // ✅ Losowe cytaty
+
 	loadConfig()
 
 	dg, err := discordgo.New("Bot " + token)
@@ -40,8 +43,8 @@ func main() {
 	dg.AddHandler(messageCreate)
 	dg.Identify.Intents = discordgo.IntentsGuildMessages
 
-	// Uruchom scheduler PRZED Open() - WAŻNE!
-	go scheduleDailyQuote(dg)
+	// 🚀 CRON SCHEDULER zamiast tickera
+	go startCronScheduler(dg)
 
 	err = dg.Open()
 	if err != nil {
@@ -49,7 +52,7 @@ func main() {
 	}
 	defer dg.Close()
 
-	fmt.Println("Bot działa! Naciśnij CTRL+C aby zakończyć.")
+	fmt.Println("Bot działa! Codzienne cytaty o 9:00 CET. Naciśnij CTRL+C aby zakończyć.")
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
@@ -132,19 +135,23 @@ func sendRandomQuote(s *discordgo.Session, channelID string) {
 	s.ChannelMessageSend(channelID, fmt.Sprintf("✨ **Złota Myśl:** ✨\n\n*%s*", quote))
 }
 
-func scheduleDailyQuote(s *discordgo.Session) {
+func startCronScheduler(s *discordgo.Session) {
 	loc, _ := time.LoadLocation("Europe/Warsaw")
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
+	c := cron.New(cron.WithLocation(loc)) // ← POPRAWIONE!
+	defer c.Stop()
 
-	for t := range ticker.C {
-		now := t.In(loc)
-		if now.Hour() == 10 && now.Minute() == 56 {
-			if config.ChannelID != "" {
-				sendRandomQuote(s, config.ChannelID)
-			}
+	_, err := c.AddFunc("30 11 * * *", func() { // 9:00 codziennie
+		fmt.Println("🕐 CRON 9:00!")
+		if config.ChannelID != "" {
+			sendRandomQuote(s, config.ChannelID)
 		}
+	})
+	if err != nil {
+		log.Fatal("Cron błąd:", err)
 	}
+
+	fmt.Println("✅ Cron działa - 9:00 CET codziennie!")
+	c.Start()
 }
 
 func sendPaginatedList(s *discordgo.Session, channelID string) {
