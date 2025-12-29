@@ -136,24 +136,20 @@ func sendRandomQuote(s *discordgo.Session, channelID string) {
 }
 
 func startCronScheduler(s *discordgo.Session) {
-	loc, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		log.Fatal("Location error:", err) // Teraz pokaże konkretny błąd
-	}
+	// Bez location - używa UTC (domyślnie)
+	c := cron.New()
 
-	c := cron.New(cron.WithLocation(loc))
-
-	_, err = c.AddFunc("0 9 * * ?", func() {
-		fmt.Println("🕐 CRON 9:00 CET!")
+	_, err := c.AddFunc("0 8 * * ?", func() { // 8:00 UTC = 9:00 CET!
+		fmt.Println("🕐 CRON 9:00 CET (8:00 UTC)!")
 		if config.ChannelID != "" {
 			sendRandomQuote(s, config.ChannelID)
 		}
 	})
 	if err != nil {
-		log.Fatal("Cron AddFunc błąd:", err)
+		log.Fatal("Cron błąd:", err)
 	}
 
-	fmt.Println("✅ Cron działa - 9:00 CET codziennie!")
+	fmt.Println("✅ Cron działa - 8:00 UTC (9:00 CET) codziennie!")
 	c.Start()
 }
 
