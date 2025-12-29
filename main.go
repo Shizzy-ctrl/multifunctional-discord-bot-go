@@ -40,6 +40,9 @@ func main() {
 	dg.AddHandler(messageCreate)
 	dg.Identify.Intents = discordgo.IntentsGuildMessages
 
+	// Uruchom scheduler PRZED Open() - WAŻNE!
+	go scheduleDailyQuote(dg)
+
 	err = dg.Open()
 	if err != nil {
 		log.Fatal("Błąd otwierania połączenia:", err)
@@ -47,9 +50,6 @@ func main() {
 	defer dg.Close()
 
 	fmt.Println("Bot działa! Naciśnij CTRL+C aby zakończyć.")
-
-	// Uruchom codzienne wysyłanie o 9:00
-	go scheduleDailyQuote(dg)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
