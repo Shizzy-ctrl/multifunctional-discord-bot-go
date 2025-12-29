@@ -136,21 +136,15 @@ func sendRandomQuote(s *discordgo.Session, channelID string) {
 }
 
 func startCronScheduler(s *discordgo.Session) {
-	// Użyj Europe/Berlin zamiast Warsaw (bardziej stabilne)
-	loc, err := time.LoadLocation("Europe/Berlin") // CET
+	loc, err := time.LoadLocation("Europe/Warsaw")
 	if err != nil {
-		log.Fatal("Location error:", err)
-		return
+		log.Fatal("Location error:", err) // Teraz pokaże konkretny błąd
 	}
 
-	// TWORZĘ CRON Z OPTIONS + PARSEREM
-	c := cron.New(
-		cron.WithLocation(loc),
-		cron.WithParser(cron.NewParser(cron.SecondOptional|cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow)),
-	)
+	c := cron.New(cron.WithLocation(loc))
 
-	_, err = c.AddFunc("39 11 * * ?", func() {
-		fmt.Println("🕐 CRON 9:00 CET! Czas:", time.Now().In(loc).Format("15:04:05"))
+	_, err = c.AddFunc("0 9 * * ?", func() {
+		fmt.Println("🕐 CRON 9:00 CET!")
 		if config.ChannelID != "" {
 			sendRandomQuote(s, config.ChannelID)
 		}
@@ -159,11 +153,8 @@ func startCronScheduler(s *discordgo.Session) {
 		log.Fatal("Cron AddFunc błąd:", err)
 	}
 
-	fmt.Println("✅ Cron działa - 9:00 CET (Europe/Berlin)!")
+	fmt.Println("✅ Cron działa - 9:00 CET codziennie!")
 	c.Start()
-
-	// ZWRÓĆ cron dla zarządzania (ważne!)
-	// return c  // Przypisz do zmiennej globalnej
 }
 
 func sendPaginatedList(s *discordgo.Session, channelID string) {
