@@ -139,7 +139,7 @@ func startCronScheduler(s *discordgo.Session) {
 	loc, _ := time.LoadLocation("Europe/Warsaw")
 	c := cron.New(cron.WithLocation(loc)) // ← POPRAWIONE!
 
-	_, err := c.AddFunc("30 11 * * *", func() { // 9:00 codziennie
+	_, err := c.AddFunc("36 11 * * *", func() { // 9:00 codziennie
 		fmt.Println("🕐 CRON 9:00!")
 		if config.ChannelID != "" {
 			sendRandomQuote(s, config.ChannelID)
