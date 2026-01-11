@@ -1,7 +1,13 @@
+import matplotlib
+
+matplotlib.use("Agg")
+
 import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import os
+import sys
 
 # Pobranie danych
 tickers = ['EIMI.L', 'CNDX.L', 'CBU0.L', 'IB01.L']
@@ -122,5 +128,11 @@ plt.tight_layout()
 plt.subplots_adjust(top=0.93)
 
 # Zapisanie wykresu
-plt.savefig('etfs_rok.png', dpi=150, bbox_inches='tight', facecolor='white')
-print("Wykres zapisany jako: etfs_rok.png")
+output_path = sys.argv[1] if len(sys.argv) > 1 else "etfs_rok.png"
+output_dir = os.path.dirname(output_path)
+if output_dir:
+    os.makedirs(output_dir, exist_ok=True)
+
+plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+plt.close(fig)
+print(f"Wykres zapisany jako: {output_path}")
