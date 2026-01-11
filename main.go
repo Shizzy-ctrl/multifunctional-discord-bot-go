@@ -18,8 +18,10 @@ import (
 )
 
 type Config struct {
-	Quotes    []string `json:"quotes"`
-	ChannelID string   `json:"channel_id"`
+	Quotes         []string `json:"quotes"`
+	ChannelID      string   `json:"channel_id"`
+	GemChannelID   string   `json:"gem_channel_id"`
+	GemSubscribers []string `json:"gem_subscribers"`
 }
 
 var (
@@ -70,7 +72,9 @@ func loadConfig() {
 				"Każdy dzień to nowa szansa.",
 				"Wierz w siebie i swoje możliwości.",
 			},
-			ChannelID: "",
+			ChannelID:      "",
+			GemChannelID:   "",
+			GemSubscribers: nil,
 		}
 		saveConfig()
 		return
@@ -124,6 +128,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 !lista - Pokaż wszystkie złote myśli
 !kanal <ID> - Ustaw kanał dla codziennych myśli o 9:00
 !gem - Wygeneruj wykres ETF jako PNG
+!gemsubscribe - Zapisz się na miesięczny wykres ETF (ostatni dzień miesiąca, 10:00)
 !pomoc - Pokaż tę pomoc`
 		s.ChannelMessageSend(m.ChannelID, help)
 	} else if content == "!gem" {
@@ -132,7 +137,47 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			log.Println("!gem error:", err)
 			s.ChannelMessageSend(m.ChannelID, "❌ Nie udało się wygenerować wykresu")
 		}
+	} else if content == "!gemsubscribe" {
+		added := addGemSubscriber(m.Author.ID)
+		config.GemChannelID = m.ChannelID
+		saveConfig()
+		if added {
+			s.ChannelMessageSend(m.ChannelID, "✅ Zapisano na miesięczny wykres ETF. Ostatni dzień miesiąca o 10:00 wrzucę wykres i oznaczę zapisanych.")
+		} else {
+			s.ChannelMessageSend(m.ChannelID, "✅ Już jesteś zapisany. Ostatni dzień miesiąca o 10:00 wrzucę wykres i oznaczę zapisanych.")
+		}
 	}
+}
+
+func addGemSubscriber(userID string) bool {
+	for _, id := range config.GemSubscribers {
+		if id == userID {
+			return false
+		}
+	}
+	config.GemSubscribers = append(config.GemSubscribers, userID)
+	return true
+}
+
+func isLastDayOfMonth(t time.Time) bool {
+	nextDay := t.AddDate(0, 0, 1)
+	return nextDay.Month() != t.Month()
+}
+
+func mentionGemSubscribers() string {
+	if len(config.GemSubscribers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, id := range config.GemSubscribers {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString("<@")
+		b.WriteString(id)
+		b.WriteString(">")
+	}
+	return b.String()
 }
 
 func generateAndSendGem(s *discordgo.Session, channelID string) error {
@@ -179,6 +224,26 @@ func startCronScheduler(s *discordgo.Session) {
 		if config.ChannelID != "" {
 			// ZMIENIONO: "Złota myśl dnia" zamiast zwykłej złotej myśli
 			sendDailyQuote(s, config.ChannelID)
+		}
+	})
+	if err != nil {
+		log.Fatal("Cron AddFunc błąd:", err)
+	}
+
+	_, err = c.AddFunc("0 10 * * *", func() {
+		now := time.Now().In(loc)
+		if !isLastDayOfMonth(now) {
+			return
+		}
+		if config.GemChannelID == "" || len(config.GemSubscribers) == 0 {
+			return
+		}
+		if msg := mentionGemSubscribers(); msg != "" {
+			s.ChannelMessageSend(config.GemChannelID, msg)
+		}
+		if err := generateAndSendGem(s, config.GemChannelID); err != nil {
+			log.Println("scheduled gem error:", err)
+			s.ChannelMessageSend(config.GemChannelID, "❌ Nie udało się wygenerować wykresu")
 		}
 	})
 	if err != nil {
