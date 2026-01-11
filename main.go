@@ -1,21 +1,19 @@
 package main
 
 import (
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/gocolly/colly/v2"
 	"github.com/robfig/cron/v3"
 )
 
@@ -35,7 +33,7 @@ func main() {
 		log.Fatal("Brak tokena Discord! Ustaw zmienną DISCORD_TOKEN")
 	}
 
-	rand.Seed(time.Now().UnixNano())
+	rand.Seed(time.Now().UnixNano()) // ✅ Losowe cytaty
 
 	loadConfig()
 
@@ -47,6 +45,7 @@ func main() {
 	dg.AddHandler(messageCreate)
 	dg.Identify.Intents = discordgo.IntentsGuildMessages
 
+	// 🚀 CRON SCHEDULER zamiast tickera
 	go startCronScheduler(dg)
 
 	err = dg.Open()
@@ -93,8 +92,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if content == "!zlotamysl" || content == "!zm" {
 		sendRandomQuote(s, m.ChannelID)
-	} else if strings.HasPrefix(content, "!gem") {
-		handleGemCommand(s, m)
 	} else if strings.HasPrefix(content, "!dodaj ") {
 		quote := strings.TrimPrefix(content, "!dodaj ")
 		config.Quotes = append(config.Quotes, quote)
@@ -126,154 +123,38 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 !usun <numer> - Usuń złotą myśl (podaj numer z listy)
 !lista - Pokaż wszystkie złote myśli
 !kanal <ID> - Ustaw kanał dla codziennych myśli o 9:00
-!gem [URL] - Pobierz wykres ze Stooq
+!gem - Wygeneruj wykres ETF jako PNG
 !pomoc - Pokaż tę pomoc`
 		s.ChannelMessageSend(m.ChannelID, help)
+	} else if content == "!gem" {
+		s.ChannelMessageSend(m.ChannelID, "⏳ Generuję wykres...")
+		if err := generateAndSendGem(s, m.ChannelID); err != nil {
+			log.Println("!gem error:", err)
+			s.ChannelMessageSend(m.ChannelID, "❌ Nie udało się wygenerować wykresu")
+		}
 	}
 }
 
-func handleGemCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-	urlStr := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(m.Content), "!gem"))
-	if urlStr == "" {
-		urlStr = "https://stooq.pl/q/?s=eimi.uk&d=20260105&c=1y&t=l&a=lg&r=cndx.uk+cbu0.uk+ib01.uk"
-	}
+func generateAndSendGem(s *discordgo.Session, channelID string) error {
+	tmpDir := os.TempDir()
+	outputPath := filepath.Join(tmpDir, fmt.Sprintf("gem_%d.png", time.Now().UnixNano()))
 
-	s.ChannelMessageSend(m.ChannelID, "⏳ Pobieram wykres...")
-
-	pngBytes, err := scrapeStooqChartPNG(urlStr)
+	cmd := exec.Command("python3", "/app/python/gem.py", outputPath)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ Nie udało się pobrać wykresu: "+err.Error())
-		return
+		return fmt.Errorf("python helper failed: %w; output: %s", err, string(out))
 	}
 
-	_, err = s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
-		Files: []*discordgo.File{
-			{Name: "gem.png", ContentType: "image/png", Reader: bytes.NewReader(pngBytes)},
-		},
-	})
+	defer os.Remove(outputPath)
+
+	file, err := os.Open(outputPath)
 	if err != nil {
-		log.Println("Błąd wysyłania pliku na Discord:", err)
+		return err
 	}
-}
+	defer file.Close()
 
-func scrapeStooqChartPNG(pageURL string) ([]byte, error) {
-	log.Printf("Scrapowanie strony: %s", pageURL)
-
-	var pngData []byte
-	var scrapeErr error
-	found := false
-
-	c := colly.NewCollector(
-		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-	)
-
-	c.SetRequestTimeout(30 * time.Second)
-
-	// Dodaj nagłówki
-	c.OnRequest(func(r *colly.Request) {
-		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-		r.Headers.Set("Accept-Language", "pl,en-US;q=0.7,en;q=0.3")
-		r.Headers.Set("Referer", "https://stooq.pl/")
-		log.Printf("Odwiedzam: %s", r.URL)
-	})
-
-	// Szukaj obrazków wykresu
-	c.OnHTML("img", func(e *colly.HTMLElement) {
-		if found {
-			return
-		}
-
-		// Sprawdź różne atrybuty src
-		imgSrc := e.Attr("src")
-		if imgSrc == "" {
-			imgSrc = e.Attr("src2")
-		}
-		if imgSrc == "" {
-			return
-		}
-
-		// Sprawdź czy to wykres (po ID, klasie lub atrybutach rodzica)
-		parent := e.DOM.Parent()
-		parentID, _ := parent.Attr("id")
-		parentClass, _ := parent.Attr("class")
-
-		isChart := strings.Contains(parentID, "chart") ||
-			strings.Contains(parentID, "aqi_mc") ||
-			strings.Contains(parentClass, "chart") ||
-			strings.Contains(imgSrc, "/q/c/") ||
-			strings.HasPrefix(imgSrc, "data:image/png;base64,")
-
-		if !isChart {
-			return
-		}
-
-		log.Printf("Znaleziono kandydata na wykres: %s", imgSrc[:min(len(imgSrc), 100)])
-
-		// Jeśli to base64, dekoduj
-		if strings.HasPrefix(imgSrc, "data:image/png;base64,") {
-			b64Data := strings.TrimPrefix(imgSrc, "data:image/png;base64,")
-			decoded, err := base64.StdEncoding.DecodeString(b64Data)
-			if err == nil && isPNG(decoded) {
-				pngData = decoded
-				found = true
-				log.Printf("✅ Pomyślnie zdekodowano base64 PNG (%d bajtów)", len(pngData))
-				return
-			}
-		}
-
-		// Jeśli to URL, pobierz obrazek
-		imgURL := e.Request.AbsoluteURL(imgSrc)
-		log.Printf("Pobieranie obrazka z: %s", imgURL)
-
-		// Stwórz nowy collector dla obrazka
-		imgCollector := c.Clone()
-		imgCollector.OnResponse(func(r *colly.Response) {
-			if strings.Contains(r.Headers.Get("Content-Type"), "image") && isPNG(r.Body) {
-				pngData = r.Body
-				found = true
-				log.Printf("✅ Pomyślnie pobrano PNG (%d bajtów)", len(pngData))
-			}
-		})
-
-		imgCollector.Visit(imgURL)
-	})
-
-	c.OnError(func(r *colly.Response, err error) {
-		scrapeErr = fmt.Errorf("błąd scrapowania: %w", err)
-		log.Printf("❌ Błąd: %v", err)
-	})
-
-	err := c.Visit(pageURL)
-	if err != nil {
-		return nil, fmt.Errorf("błąd odwiedzania strony: %w", err)
-	}
-
-	c.Wait()
-
-	if scrapeErr != nil {
-		return nil, scrapeErr
-	}
-
-	if !found || len(pngData) == 0 {
-		return nil, errors.New("nie znaleziono wykresu PNG na stronie")
-	}
-
-	return pngData, nil
-}
-
-func isPNG(b []byte) bool {
-	if len(b) < 8 {
-		return false
-	}
-	return b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4e && b[3] == 0x47 &&
-		b[4] == 0x0d && b[5] == 0x0a && b[6] == 0x1a && b[7] == 0x0a
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	_, err = s.ChannelFileSend(channelID, "etfs_rok.png", file)
+	return err
 }
 
 func sendRandomQuote(s *discordgo.Session, channelID string) {
@@ -296,6 +177,7 @@ func startCronScheduler(s *discordgo.Session) {
 	_, err = c.AddFunc("0 9 * * ?", func() {
 		fmt.Println("🕐 CRON 9:00 CET!")
 		if config.ChannelID != "" {
+			// ZMIENIONO: "Złota myśl dnia" zamiast zwykłej złotej myśli
 			sendDailyQuote(s, config.ChannelID)
 		}
 	})
@@ -307,6 +189,7 @@ func startCronScheduler(s *discordgo.Session) {
 	c.Start()
 }
 
+// NOWA FUNKCJA dla zaplanowanej złotej myśli dnia
 func sendDailyQuote(s *discordgo.Session, channelID string) {
 	if len(config.Quotes) == 0 {
 		s.ChannelMessageSend(channelID, "Brak złotych myśli! Dodaj je komendą !dodaj")
@@ -352,6 +235,7 @@ func sendPaginatedList(s *discordgo.Session, channelID string) {
 			pageChars += len(line)
 		}
 
+		// POPRAWIONE: _ dla message, err dla błędu
 		if _, err := s.ChannelMessageSend(channelID, msg.String()); err != nil {
 			log.Println("Błąd wysyłania listy:", err)
 			return
