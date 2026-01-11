@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -163,6 +162,10 @@ func scrapeStooqChartPNG(pageURL string) ([]byte, error) {
 		return nil, fmt.Errorf("nieprawidłowy URL: %w", err)
 	}
 
+	if strings.Contains(baseURL.Path, "/q/c/") || strings.HasSuffix(baseURL.Path, "/c/") {
+		return fetchStooqPNG(baseURL, baseURL)
+	}
+
 	client := &http.Client{Timeout: 20 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, baseURL.String(), nil)
 	if err != nil {
@@ -233,7 +236,10 @@ func scrapeStooqChartPNG(pageURL string) ([]byte, error) {
 	}
 
 	if strings.TrimSpace(src) == "" {
-		return nil, errors.New("nie znaleziono obrazka (aqi_mc ani img z src/src2 wskazującym na c/?)")
+		chartURL := *baseURL
+		chartURL.Path = "/q/c/"
+		chartURL.RawQuery = baseURL.RawQuery
+		return fetchStooqPNG(baseURL, &chartURL)
 	}
 
 	const prefix = "data:image/png;base64,"
@@ -253,12 +259,17 @@ func scrapeStooqChartPNG(pageURL string) ([]byte, error) {
 		return nil, fmt.Errorf("nieprawidłowy URL obrazka: %w", err)
 	}
 
+	return fetchStooqPNG(baseURL, imgURL)
+}
+
+func fetchStooqPNG(refererURL *url.URL, imgURL *url.URL) ([]byte, error) {
+	client := &http.Client{Timeout: 20 * time.Second}
 	imgReq, err := http.NewRequest(http.MethodGet, imgURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	imgReq.Header.Set("User-Agent", "Mozilla/5.0")
-	imgReq.Header.Set("Referer", baseURL.String())
+	imgReq.Header.Set("Referer", refererURL.String())
 	imgReq.Header.Set("Cookie", "privacy=1")
 
 	imgResp, err := client.Do(imgReq)
