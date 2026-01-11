@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/robfig/cron/v3"
+	"golang.org/x/net/html"
 )
 
 type Config struct {
@@ -24,6 +26,71 @@ var (
 	config     Config
 	configFile = "config.json"
 )
+
+func scrapeGemImage() (string, error) {
+	url := "https://stooq.pl/q/?s=eimi.uk&d=20260105&c=1y&t=l&a=lg&r=cndx.uk+cbu0.uk+ib01.uk"
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("błąd pobierania strony: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("błąd HTTP: %d", resp.StatusCode)
+	}
+
+	doc, err := html.Parse(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("błąd parsowania HTML: %v", err)
+	}
+
+	var findDiv func(*html.Node) *html.Node
+	findDiv = func(n *html.Node) *html.Node {
+		if n.Type == html.ElementNode && n.Data == "div" {
+			for _, attr := range n.Attr {
+				if attr.Key == "id" && attr.Val == "aqi_mc" {
+					return n
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if found := findDiv(c); found != nil {
+				return found
+			}
+		}
+		return nil
+	}
+
+	aqiDiv := findDiv(doc)
+	if aqiDiv == nil {
+		return "", fmt.Errorf("nie znaleziono div'a o id='aqi_mc'")
+	}
+
+	var findImage func(*html.Node) string
+	findImage = func(n *html.Node) string {
+		if n.Type == html.ElementNode && n.Data == "img" {
+			for _, attr := range n.Attr {
+				if attr.Key == "src" {
+					return attr.Val
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if src := findImage(c); src != "" {
+				return src
+			}
+		}
+		return ""
+	}
+
+	imageSrc := findImage(aqiDiv)
+	if imageSrc == "" {
+		return "", fmt.Errorf("nie znaleziono obrazka w div'ie")
+	}
+
+	return imageSrc, nil
+}
 
 func main() {
 	token := os.Getenv("DISCORD_TOKEN")
@@ -113,6 +180,20 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		config.ChannelID = channelID
 		saveConfig()
 		s.ChannelMessageSend(m.ChannelID, "✅ Ustawiono kanał dla codziennych myśli!")
+	} else if content == "!gem" {
+		s.ChannelMessageSend(m.ChannelID, "🔍 **Szukam obrazka GEM...**")
+
+		imageSrc, err := scrapeGemImage()
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Błąd: %v", err))
+			return
+		}
+
+		if strings.HasPrefix(imageSrc, "data:image") {
+			s.ChannelMessageSend(m.ChannelID, "💎 **GEM Chart (Base64)**\n\nObrazek został znaleziony w formie base64")
+		} else {
+			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("💎 **GEM Chart**\n\nŹródło obrazka: %s", imageSrc))
+		}
 	} else if content == "!pomoc" {
 		help := `**🌟 Złote Myśli Bot - Komendy:**
 
@@ -121,6 +202,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 !usun <numer> - Usuń złotą myśl (podaj numer z listy)
 !lista - Pokaż wszystkie złote myśli
 !kanal <ID> - Ustaw kanał dla codziennych myśli o 9:00
+!gem - Pobierz wykres GEM ze Stooq.pl
 !pomoc - Pokaż tę pomoc`
 		s.ChannelMessageSend(m.ChannelID, help)
 	}
