@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -247,7 +248,13 @@ func scrapeStooqChartPNG(pageURL string) ([]byte, error) {
 		raw := strings.TrimPrefix(src, prefix)
 		b, err := base64.StdEncoding.DecodeString(raw)
 		if err != nil {
+			b, err = base64.RawStdEncoding.DecodeString(raw)
+		}
+		if err != nil {
 			return nil, fmt.Errorf("błąd dekodowania base64: %w", err)
+		}
+		if !isPNG(b) {
+			return nil, errors.New("zdekodowane dane nie są poprawnym PNG")
 		}
 		return b, nil
 	}
@@ -285,7 +292,22 @@ func fetchStooqPNG(refererURL *url.URL, imgURL *url.URL) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !isPNG(data) {
+		ct := strings.TrimSpace(imgResp.Header.Get("Content-Type"))
+		preview := strings.TrimSpace(string(data))
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return nil, fmt.Errorf("odpowiedź nie jest PNG (Content-Type: %s, %d bajtów, początek: %q)", ct, len(data), preview)
+	}
 	return data, nil
+}
+
+func isPNG(b []byte) bool {
+	if len(b) < 8 {
+		return false
+	}
+	return b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4e && b[3] == 0x47 && b[4] == 0x0d && b[5] == 0x0a && b[6] == 0x1a && b[7] == 0x0a
 }
 
 func sendRandomQuote(s *discordgo.Session, channelID string) {
