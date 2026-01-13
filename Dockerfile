@@ -16,20 +16,13 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
 # Run stage
-FROM python:3.12-slim
+FROM alpine:3.20
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 
 # Copy the Pre-built binary from the previous stage
 COPY --from=builder /app/main .
-
-COPY python ./python
-RUN pip install --no-cache-dir -r ./python/requirements.txt
-
-ENV MPLCONFIGDIR=/tmp/matplotlib
 
 # Command to run the executable
 CMD ["./main"]
