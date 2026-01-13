@@ -6,7 +6,6 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -184,10 +183,8 @@ func generateAndSendGem(s *discordgo.Session, channelID string) error {
 	tmpDir := os.TempDir()
 	outputPath := filepath.Join(tmpDir, fmt.Sprintf("gem_%d.png", time.Now().UnixNano()))
 
-	cmd := exec.Command("python3", "/app/python/gem.py", outputPath)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("python helper failed: %w; output: %s", err, string(out))
+	if err := generateGemChart(outputPath); err != nil {
+		return err
 	}
 
 	defer os.Remove(outputPath)
