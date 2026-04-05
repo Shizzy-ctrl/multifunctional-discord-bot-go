@@ -15,22 +15,13 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/joho/godotenv"
 	"github.com/robfig/cron/v3"
 )
 
-type Config struct {
-	Quotes         []string `json:"quotes"`
-	ChannelID      string   `json:"channel_id"`
-	GemChannelID   string   `json:"gem_channel_id"`
-	GemSubscribers []string `json:"gem_subscribers"`
-}
-
-var (
-	config     Config
-	configFile = "config.json"
-)
-
 func main() {
+	godotenv.Load()
+
 	token := os.Getenv("DISCORD_TOKEN")
 	if token == "" {
 		log.Fatal("Brak tokena Discord! Ustaw zmienną DISCORD_TOKEN")
@@ -62,30 +53,6 @@ func main() {
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
-}
-
-func loadConfig() {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		config = Config{
-			Quotes: []string{
-				"Wytrwałość to klucz do sukcesu.",
-				"Każdy dzień to nowa szansa.",
-				"Wierz w siebie i swoje możliwości.",
-			},
-			ChannelID:      "",
-			GemChannelID:   "",
-			GemSubscribers: nil,
-		}
-		saveConfig()
-		return
-	}
-	json.Unmarshal(data, &config)
-}
-
-func saveConfig() {
-	data, _ := json.MarshalIndent(config, "", "  ")
-	os.WriteFile(configFile, data, 0o644)
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -343,10 +310,10 @@ func sendPaginatedList(s *discordgo.Session, channelID string) {
 
 type weatherResponse struct {
 	Daily struct {
-		Time             []string  `json:"time"`
-		TemperatureMax   []float64 `json:"temperature_2m_max"`
-		TemperatureMin   []float64 `json:"temperature_2m_min"`
-		WeatherCode      []int     `json:"weathercode"`
+		Time           []string  `json:"time"`
+		TemperatureMax []float64 `json:"temperature_2m_max"`
+		TemperatureMin []float64 `json:"temperature_2m_min"`
+		WeatherCode    []int     `json:"weathercode"`
 	} `json:"daily"`
 }
 
